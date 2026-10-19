@@ -9,6 +9,8 @@ jobs:
         with:
           channel: stable
       - run: flutter create --platforms=android --project-name meatla_browser .
+      - run: sed -i 's#minSdkVersion .*#minSdkVersion 21#' android/app/build.gradle || true
+      - run: sed -i 's#minSdk .*#minSdk 21#' android/app/build.gradle.kts || true
       - run: sed -i 's#<application#<uses-permission android:name="android.permission.INTERNET"/>\n    <application#' android/app/src/main/AndroidManifest.xml
       - run: flutter pub get
       - run: flutter build apk --release
