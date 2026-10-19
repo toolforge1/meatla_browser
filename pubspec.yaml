@@ -1,0 +1,29 @@
+name: meatla_browser
+description: Meatla Browser - Smart AI-Powered Browser
+publish_to: "none"
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.3.0 <4.0.0"
+
+# SETUP
+#  1. flutter create meatla_browser   (then replace lib/main.dart and pubspec.yaml)
+#  2. flutter pub get
+#  3. Android: android/app/build.gradle -> minSdkVersion 19+ (21+ recommended)
+#     android/app/src/main/AndroidManifest.xml -> add:
+#        <uses-permission android:name="android.permission.INTERNET"/>
+#  4. iOS: min iOS 12 (Podfile: platform :ios, '12.0')
+#  5. flutter run
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_inappwebview: ^6.1.5
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
