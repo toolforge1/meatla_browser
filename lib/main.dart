@@ -541,7 +541,7 @@ class _BrowserPageState extends State<BrowserPage> {
                 ),
               ),
             ),
-            if (m.adBlock)
+                        if (m.adBlock)
               const Tooltip(
                   message: 'Ad & tracker blocker on',
                   child: Icon(Icons.shield, color: kSky, size: 20)),
@@ -549,15 +549,21 @@ class _BrowserPageState extends State<BrowserPage> {
               tooltip: 'Split-screen AI',
               icon: Icon(Icons.vertical_split_rounded,
                   color: m.splitActive ? kSky : null),
-              onPressed: () => m.splitActive
-                  ? (m.splitActive = false, m.refresh())
-                  : m.openSplit(),
+              onPressed: () {
+                if (m.splitActive) {
+                  m.splitActive = false;
+                  m.refresh();
+                } else {
+                  m.openSplit();
+                }
+              },
             ),
           ],
         ),
       ),
     );
   }
+
 
   // ---- Bottom toolbar -----------------------------------------------------
   Widget _bottomBar(BrowserTab t) {
