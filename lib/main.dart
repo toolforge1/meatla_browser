@@ -798,6 +798,25 @@ class HomeDashboard extends StatelessWidget {
                   ],
                 ),
               ),
+            GlassCard(
+              onTap: () => model.navigate(
+                  'https://toolforge1.github.io/csv-json-tools/'),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  CircleAvatar(
+                    radius: 24,
+                    backgroundColor: const Color(0xFF38BDF8).withOpacity(.2),
+                    child: const Icon(Icons.code_rounded,
+                        color: Color(0xFF38BDF8), size: 26),
+                  ),
+                  const SizedBox(height: 10),
+                  const Text('Developer Tool',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontWeight: FontWeight.w700)),
+                ],
+              ),
+            ),
           ],
         ),
         const SizedBox(height: 18),
