@@ -88,10 +88,11 @@ const kBlockedHosts = <String>[
 // 2. STATE MODEL
 // ============================================================================
 class BrowserTab {
-  BrowserTab({this.url}) : id = _counter++;
+  BrowserTab({this.url, this.isIncognito = false}) : id = _counter++;
   static int _counter = 0;
 
   final int id;
+  final bool isIncognito;
 
   /// null => the tab shows the AI dashboard (home).
   String? url;
@@ -186,24 +187,35 @@ class BrowserModel extends ChangeNotifier {
   }
 
   // ---- Tabs ---------------------------------------------------------------
-  void newTab({String? url}) {
-    tabs.add(BrowserTab(url: url));
+  void newTab({String? url, bool incognito = false}) {
+    tabs.add(BrowserTab(url: url, isIncognito: incognito));
     current = tabs.length - 1;
     splitActive = false;
     notifyListeners();
   }
 
   void closeTab(int i) {
+    if (i < 0 || i >= tabs.length) return;
     if (tabs.length == 1) {
-      goHome();
+      if (tabs.first.isIncognito) {
+        tabs[0] = BrowserTab();
+        current = 0;
+        splitActive = false;
+        notifyListeners();
+      } else {
+        goHome();
+      }
       return;
     }
     tabs.removeAt(i);
+    if (i < current) current--;
     if (current >= tabs.length) current = tabs.length - 1;
+    splitActive = false;
     notifyListeners();
   }
 
   void selectTab(int i) {
+    if (i < 0 || i >= tabs.length) return;
     current = i;
     splitActive = false;
     notifyListeners();
@@ -647,6 +659,7 @@ class BrowserWebView extends StatelessWidget {
         allowsInlineMediaPlayback: true,
         mediaPlaybackRequiresUserGesture: false,
         supportZoom: true,
+        incognito: tab.isIncognito,
         contentBlockers: model.blockers(),
         // A modern mobile UA keeps AI sites happy.
         userAgent:
@@ -686,7 +699,7 @@ class BrowserWebView extends StatelessWidget {
       },
       onCreateWindow: (c, req) async {
         final u = req.request.url?.toString();
-        if (u != null) model.newTab(url: u);
+        if (u != null) model.newTab(url: u, incognito: tab.isIncognito);
         return true;
       },
     );
@@ -715,7 +728,18 @@ class HomeDashboard extends StatelessWidget {
               gradient: const LinearGradient(colors: [kSky, Color(0xFF2563EB)]),
               boxShadow: [BoxShadow(color: kSky.withOpacity(.6), blurRadius: 30)],
             ),
-            child: const Icon(Icons.public, size: 46, color: Colors.white),
+            child: ClipOval(
+              child: Padding(
+                padding: const EdgeInsets.all(5),
+                child: Image.asset(
+                  'copilot_image_1792323887881.png',
+                  fit: BoxFit.contain,
+                  errorBuilder: (_, __, ___) => const Icon(
+                    Icons.public, size: 46, color: Colors.white,
+                  ),
+                ),
+              ),
+            ),
           ),
         ),
         const SizedBox(height: 14),
@@ -729,7 +753,23 @@ class HomeDashboard extends StatelessWidget {
           child: Text('Smart AI-Powered Browser',
               style: TextStyle(color: kSky.withOpacity(.9), letterSpacing: 2)),
         ),
-        const SizedBox(height: 26),
+        const SizedBox(height: 18),
+        SizedBox(
+          width: double.infinity,
+          child: FilledButton.icon(
+            onPressed: () => model.newTab(),
+            icon: const Icon(Icons.add_rounded),
+            label: const Text('New Tab'),
+            style: FilledButton.styleFrom(
+              backgroundColor: kSky,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              textStyle: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            ),
+          ),
+        ),
+        const SizedBox(height: 20),
         const Text('AI Quick Access',
             style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
         const SizedBox(height: 12),
@@ -1090,20 +1130,52 @@ void showTabManager(BuildContext context, BrowserModel m) {
             child: Column(
               children: [
                 Row(children: [
-                  Text('${m.tabs.length} Tabs',
-                      style: const TextStyle(
-                          fontSize: 18, fontWeight: FontWeight.w800)),
-                  const Spacer(),
-                  TextButton.icon(
-                    onPressed: () {
-                      m.newTab();
-                      Navigator.pop(ctx);
-                    },
-                    icon: const Icon(Icons.add, color: kSky),
-                    label: const Text('New tab',
-                        style: TextStyle(color: kSky)),
+                  Expanded(
+                    child: Text('${m.tabs.length} Tabs',
+                        style: const TextStyle(
+                            fontSize: 18, fontWeight: FontWeight.w800)),
+                  ),
+                  IconButton(
+                    tooltip: 'Close tab manager',
+                    onPressed: () => Navigator.pop(ctx),
+                    icon: const Icon(Icons.close_rounded),
                   ),
                 ]),
+                Row(
+                  children: [
+                    Expanded(
+                      child: FilledButton.icon(
+                        onPressed: () {
+                          m.newTab();
+                          Navigator.pop(ctx);
+                        },
+                        icon: const Icon(Icons.add_rounded),
+                        label: const Text('New Tab'),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: kSky,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: () {
+                          m.newTab(incognito: true);
+                          Navigator.pop(ctx);
+                        },
+                        icon: const Icon(Icons.visibility_off_rounded),
+                        label: const Text('Incognito'),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: kSky,
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
                 Expanded(
                   child: GridView.builder(
                     gridDelegate:
@@ -1136,12 +1208,34 @@ void showTabManager(BuildContext context, BrowserModel m) {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Row(children: [
-                                  Icon(t.isHome ? Icons.home : Icons.language,
-                                      size: 16, color: kSky),
-                                  const Spacer(),
-                                  InkWell(
-                                    onTap: () => m.closeTab(i),
-                                    child: const Icon(Icons.close, size: 18),
+                                  Icon(
+                                    t.isIncognito
+                                        ? Icons.visibility_off_rounded
+                                        : (t.isHome ? Icons.home_rounded : Icons.language_rounded),
+                                    size: 17,
+                                    color: t.isIncognito ? Colors.deepPurpleAccent : kSky,
+                                  ),
+                                  const SizedBox(width: 5),
+                                  if (t.isIncognito)
+                                    const Expanded(
+                                      child: Text('INCOGNITO',
+                                        maxLines: 1,
+                                        style: TextStyle(fontSize: 9, fontWeight: FontWeight.w800, color: Colors.deepPurpleAccent),
+                                      ),
+                                    )
+                                  else
+                                    const Spacer(),
+                                  Material(
+                                    color: Colors.red.withOpacity(.15),
+                                    shape: const CircleBorder(),
+                                    child: IconButton(
+                                      tooltip: 'Close this tab',
+                                      visualDensity: VisualDensity.compact,
+                                      constraints: const BoxConstraints(minWidth: 34, minHeight: 34),
+                                      padding: EdgeInsets.zero,
+                                      onPressed: () => m.closeTab(i),
+                                      icon: const Icon(Icons.close_rounded, size: 18, color: Colors.redAccent),
+                                    ),
                                   ),
                                 ]),
                                 const Spacer(),
@@ -1150,7 +1244,7 @@ void showTabManager(BuildContext context, BrowserModel m) {
                                     overflow: TextOverflow.ellipsis,
                                     style: const TextStyle(
                                         fontWeight: FontWeight.w700)),
-                                Text(t.url ?? 'meatla://home',
+                                Text(t.isIncognito ? 'Private tab • history not saved' : (t.url ?? 'meatla://home'),
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
                                     style: const TextStyle(fontSize: 11)),
