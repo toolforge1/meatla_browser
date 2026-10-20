@@ -1,29 +1,72 @@
-name: Build APK
-on: workflow_dispatch
+name: Build and Release Meatla Browser APK
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
-      - run: flutter create --platforms=android --project-name meatla_browser .
-      - run: |
+          cache: true
+
+      - name: Generate Android project
+        run: flutter create --platforms=android --project-name meatla_browser .
+
+      - name: Set Android minimum SDK and internet permission
+        run: |
           if [ -f android/app/build.gradle.kts ]; then
             sed -i 's/minSdk = .*/minSdk = 21/g' android/app/build.gradle.kts
           fi
           if [ -f android/app/build.gradle ]; then
             sed -i 's/minSdkVersion.*/minSdkVersion 21/g' android/app/build.gradle
           fi
-      - run: sed -i 's#<application#<uses-permission android:name="android.permission.INTERNET"/>\n    <application#' android/app/src/main/AndroidManifest.xml
-      - run: flutter pub get
-      - run: |
-          # Proguard fix for cached plugins
+          grep -q 'android.permission.INTERNET' android/app/src/main/AndroidManifest.xml || sed -i 's#<application#<uses-permission android:name="android.permission.INTERNET"/>\n    <application#' android/app/src/main/AndroidManifest.xml
+
+      - name: Resolve Flutter packages
+        run: flutter pub get
+
+      - name: Generate launcher icons from the Meatla Browser logo
+        run: dart run flutter_launcher_icons
+
+      - name: Fix cached Android plugin ProGuard filename
+        run: |
           find ~/.pub-cache -name "build.gradle" -type f -exec sed -i 's/proguard-android.txt/proguard-android-optimize.txt/g' {} + || true
-      - run: flutter build apk --release
-      - uses: actions/upload-artifact@v4
+
+      - name: Build release APK
+        run: |
+          flutter build apk --release
+          cp build/app/outputs/flutter-apk/app-release.apk Meatla-Browser.apk
+          test -s Meatla-Browser.apk
+
+      - name: Upload APK build artifact
+        uses: actions/upload-artifact@v4
         with:
-          name: meatla-apk
-          path: build/app/outputs/flutter-apk/app-release.apk
-          
+          name: meatla-browser-apk
+          path: Meatla-Browser.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish permanent APK download release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: Meatla Browser v1.0.${{ github.run_number }}
+          body: |
+            Meatla Browser for Android.
+
+            Features in this build include the custom logo, AI quick-access dashboard,
+            tab manager, new tab and incognito tab controls, and ad/tracker blocking.
+            Please review the in-app privacy information before relying on private browsing.
+          files: Meatla-Browser.apk
+          make_latest: true
