@@ -8,10 +8,13 @@
 //           and minSdkVersion 21+.   iOS: platform :ios, '12.0'
 // ============================================================================
 
+import 'dart:async';
+import 'dart:convert';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -107,8 +110,86 @@ class BrowserTab {
 }
 
 class BrowserModel extends ChangeNotifier {
+  BrowserModel() { _restoreSession(); }
+  static const _sessionKey = 'meatla_browser_session_v1';
+  static const _historyKey = 'meatla_browser_history_v1';
   final List<BrowserTab> tabs = [BrowserTab()];
+  final List<Map<String, String>> history = [];
   int current = 0;
+  Timer? _persistTimer;
+  Future<void> _restoreSession() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final savedHistory = prefs.getString(_historyKey);
+      if (savedHistory != null) {
+        final decoded = jsonDecode(savedHistory);
+        if (decoded is List) history.addAll(decoded.whereType<Map>().map((e) => <String, String>{
+          'url': (e['url'] ?? '').toString(), 'title': (e['title'] ?? '').toString(),
+          'visitedAt': (e['visitedAt'] ?? '').toString(),
+        }).where((e) => e['url']!.isNotEmpty));
+      }
+      final savedSession = prefs.getString(_sessionKey);
+      if (savedSession != null) {
+        final decoded = jsonDecode(savedSession);
+        if (decoded is Map && decoded['tabs'] is List) {
+          final restored = <BrowserTab>[];
+          for (final item in decoded['tabs'] as List) {
+            if (item is! Map) continue;
+            final rawUrl = item['url']?.toString();
+            final tab = BrowserTab(url: (rawUrl == null || rawUrl.isEmpty) ? null : rawUrl);
+            tab.title = (item['title']?.toString().isNotEmpty ?? false)
+                ? item['title'].toString() : (tab.isHome ? 'New Tab' : rawUrl!);
+            restored.add(tab);
+          }
+          if (restored.isNotEmpty) {
+            tabs..clear()..addAll(restored);
+            current = decoded['current'] is int
+                ? (decoded['current'] as int).clamp(0, tabs.length - 1) : 0;
+          }
+        }
+      }
+    } catch (_) {}
+    notifyListeners();
+  }
+  void _schedulePersist() {
+    _persistTimer?.cancel();
+    _persistTimer = Timer(const Duration(milliseconds: 650), () async {
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        final normalTabs = tabs.where((t) => !t.isIncognito).toList();
+        final selected = tab;
+        final selectedIndex = selected.isIncognito ? 0 : normalTabs.indexWhere((t) => identical(t, selected));
+        await prefs.setString(_sessionKey, jsonEncode({
+          'current': selectedIndex < 0 ? 0 : selectedIndex,
+          'tabs': normalTabs.map((t) => {'url': t.url, 'title': t.title}).toList(),
+        }));
+      } catch (_) {}
+    });
+  }
+  Future<void> recordVisit(String? url, String? title, {bool isIncognito = false}) async {
+    if (isIncognito || url == null) return;
+    final uri = Uri.tryParse(url);
+    if (uri == null || !['http', 'https'].contains(uri.scheme)) return;
+    final now = DateTime.now().toIso8601String();
+    if (history.isNotEmpty && history.first['url'] == url) {
+      history.first['title'] = (title?.isNotEmpty ?? false) ? title! : url;
+      history.first['visitedAt'] = now;
+    } else {
+      history.insert(0, {'url': url, 'title': (title?.isNotEmpty ?? false) ? title! : url, 'visitedAt': now});
+    }
+    if (history.length > 500) history.removeRange(500, history.length);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_historyKey, jsonEncode(history));
+    } catch (_) {}
+    notifyListeners();
+  }
+  Future<void> clearHistory() async {
+    history.clear();
+    try { final prefs = await SharedPreferences.getInstance(); await prefs.remove(_historyKey); } catch (_) {}
+    notifyListeners();
+  }
+  void openHistoryItem(String url) => newTab(url: url);
 
   SearchEngine engine = SearchEngine.google;
   bool adBlock = true;
@@ -124,7 +205,7 @@ class BrowserModel extends ChangeNotifier {
 
   BrowserTab get tab => tabs[current];
 
-  void refresh() => notifyListeners();
+  void refresh() { _schedulePersist(); notifyListeners(); }
 
   // ---- URL parsing --------------------------------------------------------
   /// Turns whatever the user typed into a loadable URL.
@@ -191,6 +272,7 @@ class BrowserModel extends ChangeNotifier {
     tabs.add(BrowserTab(url: url, isIncognito: incognito));
     current = tabs.length - 1;
     splitActive = false;
+    _schedulePersist();
     notifyListeners();
   }
 
@@ -211,6 +293,7 @@ class BrowserModel extends ChangeNotifier {
     if (i < current) current--;
     if (current >= tabs.length) current = tabs.length - 1;
     splitActive = false;
+    _schedulePersist();
     notifyListeners();
   }
 
@@ -218,6 +301,7 @@ class BrowserModel extends ChangeNotifier {
     if (i < 0 || i >= tabs.length) return;
     current = i;
     splitActive = false;
+    _schedulePersist();
     notifyListeners();
   }
 
@@ -687,6 +771,8 @@ class BrowserWebView extends StatelessWidget {
       onLoadStop: (c, url) async {
         tab.loading = false;
         tab.url = url?.toString() ?? tab.url;
+        await model.recordVisit(tab.url, tab.title, isIncognito: tab.isIncognito);
+        model.refresh();
         await _updateNav(c);
       },
       onUpdateVisitedHistory: (c, url, _) async {
@@ -1283,6 +1369,82 @@ void showTabManager(BuildContext context, BrowserModel m) {
     ),
   );
 }
+class HistoryPage extends StatelessWidget {
+  const HistoryPage({super.key, required this.model});
+  final BrowserModel model;
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: model,
+      builder: (context, _) => Scaffold(
+        extendBodyBehindAppBar: true,
+        appBar: AppBar(
+          title: const Text('Browsing history'),
+          actions: [
+            if (model.history.isNotEmpty)
+              IconButton(
+                tooltip: 'Clear history',
+                icon: const Icon(Icons.delete_outline_rounded),
+                onPressed: () async {
+                  final shouldClear = await showDialog<bool>(
+                    context: context,
+                    builder: (ctx) => AlertDialog(
+                      title: const Text('Clear browsing history?'),
+                      content: const Text('This clears saved history but keeps your open tabs.'),
+                      actions: [
+                        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+                        FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Clear')),
+                      ],
+                    ),
+                  );
+                  if (shouldClear == true) await model.clearHistory();
+                },
+              ),
+          ],
+        ),
+        body: GradientBg(
+          child: SafeArea(
+            child: model.history.isEmpty
+                ? const Center(child: Text('No browsing history yet'))
+                : ListView.separated(
+                    padding: const EdgeInsets.all(12),
+                    itemCount: model.history.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 8),
+                    itemBuilder: (context, index) {
+                      final item = model.history[index];
+                      final url = item['url'] ?? '';
+                      final title = (item['title']?.isNotEmpty ?? false) ? item['title']! : url;
+                      return GlassCard(
+                        onTap: () { model.openHistoryItem(url); Navigator.pop(context); },
+                        child: Row(children: [
+                          const Icon(Icons.language_rounded, color: kSky),
+                          const SizedBox(width: 12),
+                          Expanded(child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700)),
+                              const SizedBox(height: 4),
+                              Text(url, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12)),
+                              if ((item['visitedAt'] ?? '').isNotEmpty)
+                                Text(item['visitedAt']!, style: const TextStyle(fontSize: 10, color: kSky)),
+                            ],
+                          )),
+                          IconButton(
+                            tooltip: 'Open in new tab',
+                            icon: const Icon(Icons.open_in_new_rounded),
+                            onPressed: () { model.openHistoryItem(url); Navigator.pop(context); },
+                          ),
+                        ]),
+                      );
+                    },
+                  ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 // ============================================================================
 // 6c. SETTINGS & ABOUT
 // ============================================================================
@@ -1359,6 +1521,18 @@ class SettingsPage extends StatelessWidget {
                         onSelectionChanged: (s) => model.setTheme(s.first),
                       ),
                     ],
+                  ),
+                ),
+                const SizedBox(height: 12),
+                GlassCard(
+                  onTap: () => Navigator.push(context,
+                      MaterialPageRoute(builder: (_) => HistoryPage(model: model))),
+                  child: const ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(Icons.history_rounded, color: kSky),
+                    title: Text('Browsing history'),
+                    subtitle: Text('View and clear visited websites'),
+                    trailing: Icon(Icons.chevron_right),
                   ),
                 ),
                 const SizedBox(height: 12),
