@@ -151,20 +151,22 @@ class BrowserModel extends ChangeNotifier {
     } catch (_) {}
     notifyListeners();
   }
+  Future<void> _saveSessionNow() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final normalTabs = tabs.where((t) => !t.isIncognito).toList();
+      final selected = tab;
+      final selectedIndex = selected.isIncognito ? 0 : normalTabs.indexWhere((t) => identical(t, selected));
+      await prefs.setString(_sessionKey, jsonEncode({
+        'current': selectedIndex < 0 ? 0 : selectedIndex,
+        'tabs': normalTabs.map((t) => {'url': t.url, 'title': t.title}).toList(),
+      }));
+    } catch (_) {}
+  }
+
   void _schedulePersist() {
     _persistTimer?.cancel();
-    _persistTimer = Timer(const Duration(milliseconds: 650), () async {
-      try {
-        final prefs = await SharedPreferences.getInstance();
-        final normalTabs = tabs.where((t) => !t.isIncognito).toList();
-        final selected = tab;
-        final selectedIndex = selected.isIncognito ? 0 : normalTabs.indexWhere((t) => identical(t, selected));
-        await prefs.setString(_sessionKey, jsonEncode({
-          'current': selectedIndex < 0 ? 0 : selectedIndex,
-          'tabs': normalTabs.map((t) => {'url': t.url, 'title': t.title}).toList(),
-        }));
-      } catch (_) {}
-    });
+    _persistTimer = Timer(const Duration(milliseconds: 250), _saveSessionNow);
   }
   Future<void> recordVisit(String? url, String? title, {bool isIncognito = false}) async {
     if (isIncognito || url == null) return;
@@ -226,6 +228,7 @@ class BrowserModel extends ChangeNotifier {
     final url = resolve(input);
     final t = tab;
     splitActive = false;
+    _schedulePersist();
     if (t.controller != null && !t.isHome) {
       t.controller!.loadUrl(urlRequest: URLRequest(url: WebUri(url)));
     } else {
@@ -256,6 +259,7 @@ class BrowserModel extends ChangeNotifier {
 
   void goHome() {
     splitActive = false;
+    _schedulePersist();
     tab
       ..url = null
       ..title = 'New Tab'
@@ -283,6 +287,7 @@ class BrowserModel extends ChangeNotifier {
         tabs[0] = BrowserTab();
         current = 0;
         splitActive = false;
+        _schedulePersist();
         notifyListeners();
       } else {
         goHome();
