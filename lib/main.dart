@@ -144,7 +144,7 @@ class BrowserModel extends ChangeNotifier {
           if (restored.isNotEmpty) {
             tabs..clear()..addAll(restored);
             current = decoded['current'] is int
-                ? (decoded['current'] as int).clamp(0, tabs.length - 1) : 0;
+                ? (decoded['current'] as int).clamp(0, tabs.length - 1).toInt() : 0;
           }
         }
       }
@@ -779,8 +779,9 @@ class BrowserWebView extends StatelessWidget {
         tab.url = url?.toString() ?? tab.url;
         await _updateNav(c);
       },
-      onTitleChanged: (c, title) {
+      onTitleChanged: (c, title) async {
         tab.title = (title == null || title.isEmpty) ? tab.title : title;
+        await model.recordVisit(tab.url, tab.title, isIncognito: tab.isIncognito);
         model.refresh();
       },
       onCreateWindow: (c, req) async {
