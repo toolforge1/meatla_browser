@@ -477,11 +477,6 @@ class _BrowserPageState extends State<BrowserPage> {
                                               model: m),
                                   ],
                                 ),
-                                Positioned(
-                                  right: 16,
-                                  bottom: 16,
-                                  child: _aiFab(),
-                                ),
                               ],
                             ),
                     ),
@@ -569,6 +564,11 @@ class _BrowserPageState extends State<BrowserPage> {
                   m.openSplit();
                 }
               },
+            ),
+            IconButton(
+              tooltip: 'AI assistant',
+              icon: const Icon(Icons.auto_awesome_rounded, color: kSky),
+              onPressed: () => showAiPanel(context, m),
             ),
           ],
         ),
