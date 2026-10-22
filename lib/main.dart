@@ -166,7 +166,14 @@ class BrowserModel extends ChangeNotifier {
 
   void _schedulePersist() {
     _persistTimer?.cancel();
-    _persistTimer = Timer(const Duration(milliseconds: 250), _saveSessionNow);
+    _persistTimer = Timer(const Duration(milliseconds: 250), () { unawaited(_saveSessionNow()); });
+  }
+
+  /// Flush pending tab state immediately, including when Android backgrounds the app.
+  Future<void> persistNow() async {
+    _persistTimer?.cancel();
+    _persistTimer = null;
+    await _saveSessionNow();
   }
   Future<void> recordVisit(String? url, String? title, {bool isIncognito = false}) async {
     if (isIncognito || url == null) return;
@@ -490,7 +497,7 @@ class BrowserPage extends StatefulWidget {
   State<BrowserPage> createState() => _BrowserPageState();
 }
 
-class _BrowserPageState extends State<BrowserPage> {
+class _BrowserPageState extends State<BrowserPage> with WidgetsBindingObserver {
   final _urlCtrl = TextEditingController();
   final _focus = FocusNode();
   BrowserModel get m => widget.model;
@@ -498,7 +505,18 @@ class _BrowserPageState extends State<BrowserPage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     m.addListener(_syncUrl);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached ||
+        state == AppLifecycleState.hidden) {
+      unawaited(m.persistNow());
+    }
   }
 
   void _syncUrl() {
@@ -509,6 +527,8 @@ class _BrowserPageState extends State<BrowserPage> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    unawaited(m.persistNow());
     m.removeListener(_syncUrl);
     _urlCtrl.dispose();
     _focus.dispose();
@@ -777,6 +797,7 @@ class BrowserWebView extends StatelessWidget {
         tab.loading = false;
         tab.url = url?.toString() ?? tab.url;
         await model.recordVisit(tab.url, tab.title, isIncognito: tab.isIncognito);
+        await model.persistNow();
         model.refresh();
         await _updateNav(c);
       },
@@ -787,6 +808,7 @@ class BrowserWebView extends StatelessWidget {
       onTitleChanged: (c, title) async {
         tab.title = (title == null || title.isEmpty) ? tab.title : title;
         await model.recordVisit(tab.url, tab.title, isIncognito: tab.isIncognito);
+        await model.persistNow();
         model.refresh();
       },
       onCreateWindow: (c, req) async {
